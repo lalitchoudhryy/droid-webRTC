@@ -14,6 +14,9 @@ const wss = new WebSocket.Server({
   server,
   perMessageDeflate: false, // Disable compression for lower latency
   maxPayload: 1024 * 1024, // 1MB max payload
+  // Add WebSocket server configs for better mobile handling
+  clientTracking: true,
+  backlog: 100,
 });
 
 // Store clients with their roles and stream types
@@ -22,8 +25,30 @@ const clients = new Map(); // Using Map to store client info
 // Add at the top with other declarations
 const activeStreams = new Set();
 
+// Add connection tracking
+const connectionStats = {
+  total: 0,
+  mobile: 0,
+};
+
 // WebSocket connection handler
 wss.on("connection", (ws, req) => {
+  // Track user agent for mobile detection
+  const userAgent = req.headers["user-agent"] || "";
+  const isMobile =
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      userAgent
+    );
+
+  if (isMobile) {
+    connectionStats.mobile++;
+    // Set smaller ping interval for mobile
+    ws.pingInterval = 15000; // 15 seconds for mobile
+  } else {
+    ws.pingInterval = 30000; // 30 seconds for desktop
+  }
+  connectionStats.total++;
+
   // Add ping-pong heartbeat to detect stale connections
   ws.isAlive = true;
   ws.on("pong", () => {
@@ -44,6 +69,8 @@ wss.on("connection", (ws, req) => {
             role: message.role,
             streamId: message.streamId,
             peerId: message.peerId,
+            isMobile,
+            connectionTime: new Date(),
           });
 
           // Track active streams when a streamer connects
@@ -188,20 +215,19 @@ function broadcastDisconnection(peerId) {
   });
 }
 
-// Add heartbeat interval to check for stale connections
-const interval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) {
-      clients.delete(ws);
-      return ws.terminate();
-    }
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
+// Modify heartbeat interval for mobile clients
+const heartbeat = (ws) => {
+  if (ws.isAlive === false) {
+    clients.delete(ws);
+    return ws.terminate();
+  }
+  ws.isAlive = false;
+  ws.ping();
+};
 
-wss.on("close", () => {
-  clearInterval(interval);
+// Individual heartbeat intervals
+clients.forEach((info, ws) => {
+  setInterval(() => heartbeat(ws), ws.pingInterval);
 });
 
 // Add this new function for broadcasting active streams
