@@ -167,9 +167,18 @@ function forwardToClient(targetPeerId, message) {
 }
 
 function broadcastDisconnection(peerId) {
+  // Find which stream this peer was associated with
+  let disconnectedStreamId = null;
+  clients.forEach((info) => {
+    if (info.peerId === peerId && info.role === "streamer") {
+      disconnectedStreamId = info.streamId;
+    }
+  });
+
   const message = JSON.stringify({
     type: "peer-disconnected",
     peerId: peerId,
+    streamId: disconnectedStreamId, // Add streamId to the message
   });
 
   clients.forEach((info, ws) => {
